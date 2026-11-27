@@ -378,6 +378,7 @@ class TvMenu:
             ("Свободно:", f"{disk['free'] / 1e9:.1f} GB от {disk['total'] / 1e9:.1f} GB"),
             ("IP:", ", ".join(system.ip_addresses())),
             ("CEC:", "работи" if a.cec.available else "не отговаря"),
+            ("Темп.:", _health_text(system.health())),
             ("Защита SD:", "включена" if system.protection_status()["active"] else "изключена"),
         ]
         ev, x, y = self._frame("Информация", 120 + len(rows) * 66 + 90, width=1300)
@@ -386,6 +387,19 @@ class TvMenu:
             ev.append(text(x + 300, y + i * 66, clip(v, 50), 38))
         self._footer(ev, x, y + len(rows) * 66 + 20, "OK / ◄ назад")
         return ev
+
+
+def _health_text(h):
+    if h["temp"] is None:
+        return "неизвестна"
+    s = f"{h['temp']:.0f} °C"
+    if h["level"] == "hot":
+        s += "  ПРЕГРЯВА"
+    elif h["level"] == "warm":
+        s += "  топъл"
+    if h["undervoltage_now"]:
+        s += "  · слабо захранване!"
+    return s
 
 
 def _qr_esc(s):

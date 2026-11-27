@@ -97,6 +97,61 @@ def clock_saver():
         save_clock()
 
 
+# ---------------- temperature & power supply ----------------
+TEMP_WARM = 65.0   # Pi 3B+ starts lowering its clock around 60-70 °C
+TEMP_HOT = 80.0    # hard throttling
+
+_health_cache = {"t": 0.0, "data": None}
+_health_lock = threading.Lock()
+
+
+def _read_temp():
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp") as f:
+            return round(int(f.read().strip()) / 1000.0, 1)
+    except (OSError, ValueError):
+        return None
+
+
+def _read_throttled():
+    """vcgencmd get_throttled -> int bit mask, or None if not available."""
+    if not shutil.which("vcgencmd"):
+        return None
+    try:
+        out = _run(["vcgencmd", "get_throttled"], timeout=5).stdout.strip()  # throttled=0x50005
+        return int(out.split("=")[1], 16)
+    except (subprocess.SubprocessError, OSError, IndexError, ValueError):
+        return None
+
+
+def health():
+    """CPU temperature and power problems reported by the firmware (cached for 10 s)."""
+    with _health_lock:
+        if _health_cache["data"] and time.time() - _health_cache["t"] < 10:
+            return _health_cache["data"]
+        if config.DEV:
+            temp, bits = 52.3, 0
+        else:
+            temp, bits = _read_temp(), _read_throttled()
+        b = bits or 0
+        data = {
+            "temp": temp,
+            "level": None if temp is None else "hot" if temp >= TEMP_HOT else "warm" if temp >= TEMP_WARM else "ok",
+            "known": bits is not None,
+            # bit 0/16: under-voltage now / since boot;  bits 1-3 / 17-19: clock capped or throttled
+            "undervoltage_now": bool(b & 0x1),
+            "undervoltage_past": bool(b & 0x10000),
+            "throttled_now": bool(b & 0xE),
+            "throttled_past": bool(b & 0xE0000),
+        }
+        if data["level"] == "hot" or data["undervoltage_now"]:
+            prev = _health_cache["data"] or {}
+            if prev.get("level") != data["level"] or prev.get("undervoltage_now") != data["undervoltage_now"]:
+                log.warning("Health problem: temp=%s °C, throttled=0x%x", temp, b)
+        _health_cache.update(t=time.time(), data=data)
+        return data
+
+
 # ---------------- HDMI signal ----------------
 _FB_BLANK = "/sys/class/graphics/fb0/blank"
 

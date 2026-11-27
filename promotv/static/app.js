@@ -125,10 +125,53 @@ async function refreshStatus() {
   $("#clock").classList.toggle("bad", !s.time.trusted);
   $("#timeWarn").classList.toggle("hidden", s.time.trusted);
   $("#dataWarn").classList.toggle("hidden", s.protection.data_persistent);
+  renderHealth(s.health);
   $("#disk").textContent = fmtSize(s.disk.free) + " свободни";
 
   $$(".item").forEach((li) => li.classList.toggle("playing", li.dataset.name === p.current));
   if (!live) paintScreen();
+}
+
+const fmtTemp = (t) => `${String(Math.round(t * 10) / 10).replace(".", ",")} °C`;
+
+function renderHealth(h) {
+  const pill = $("#temp");
+  if (!h || h.temp == null) { pill.classList.add("hidden"); }
+  else {
+    pill.classList.remove("hidden");
+    pill.textContent = `${Math.round(h.temp)}°`;
+    pill.className = "pill temp" + (h.level === "hot" ? " hot" : h.level === "warm" ? " warm" : "");
+  }
+  const box = $("#healthWarn");
+  let msg = "", cls = "warn";
+  if (h && h.undervoltage_now) {
+    msg = "Захранването е слабо в момента. Raspberry Pi може да забие или да насича. Използвайте захранване 5 V / 2,5 A, най-добре официалното, и къс кабел.";
+    cls = "danger";
+  } else if (h && h.level === "hot") {
+    msg = `Raspberry Pi прегрява (${fmtTemp(h.temp)}) и се забавя, видеото може да насича. Сложете радиатори и осигурете въздух около него.`;
+    cls = "danger";
+  } else if (h && h.level === "warm" && h.throttled_now) {
+    msg = `Raspberry Pi е топъл (${fmtTemp(h.temp)}) и вече намалява скоростта си. Радиатор или проветрива кутия ще помогнат.`;
+  }
+  box.textContent = msg;
+  box.className = "notice " + cls + (msg ? "" : " hidden");
+}
+
+function healthFacts(h) {
+  if (!h) return [];
+  const temp = h.temp == null ? "неизвестна"
+    : fmtTemp(h.temp) + (h.level === "hot" ? ", прегрява" : h.level === "warm" ? ", топъл" : ", нормална");
+  let power = "неизвестно";
+  if (h.known) {
+    power = h.undervoltage_now ? "слабо в момента"
+      : h.undervoltage_past ? "имало е спадове след последното включване" : "нормално";
+  }
+  const facts = [el("dt", {}, "Температура"), el("dd", {}, temp), el("dt", {}, "Захранване"), el("dd", {}, power)];
+  if (h.known && (h.throttled_now || h.throttled_past)) {
+    facts.push(el("dt", {}, "Забавяне"), el("dd", {}, h.throttled_now ? "в момента се забавя заради топлина или захранване"
+      : "забавял се е след последното включване"));
+  }
+  return facts;
 }
 
 let screenFor = null;   // which file the screen image currently shows
@@ -518,6 +561,7 @@ async function loadSettings() {
     el("dt", {}, "Карта"), el("dd", {}, `${fmtSize(s.disk.free)} свободни от ${fmtSize(s.disk.total)}`),
     el("dt", {}, "Версия"), el("dd", {}, s.version));
   const st = await api("/api/status");
+  $("#sysInfo").append(...healthFacts(st.health));
   $$("input[name=powerMode]").forEach((r) => (r.checked = r.value === st.settings.power_off_mode));
   renderProtection(st.protection);
 }

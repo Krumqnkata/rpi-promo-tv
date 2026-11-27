@@ -78,6 +78,7 @@ def create_web(app):
                                             "fade", "fade_duration", "power_off_mode")},
             "disk": system.disk_usage(),
             "protection": system.protection_status(),
+            "health": system.health(),
         })
 
     @web.get("/api/ping")

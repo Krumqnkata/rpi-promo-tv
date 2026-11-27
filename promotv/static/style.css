@@ -59,9 +59,11 @@ h3 { font-size: 19px; margin: 0 0 12px; }
 .bars i:nth-child(5), .testcard i:nth-child(5) { background: var(--b5); }
 .bars i:nth-child(6), .testcard i:nth-child(6) { background: var(--b6); }
 .bars i:nth-child(7), .testcard i:nth-child(7) { background: var(--b7); }
-.clock { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--ink-2); font-size: 15px;
+.meters { display: flex; gap: 6px; }
+.pill { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--ink-2); font-size: 15px;
   padding: 3px 10px; border-radius: 99px; background: var(--surface); }
-.clock.bad { color: var(--amber); background: var(--amber-bg); }
+.clock.bad, .temp.warm { color: var(--amber); background: var(--amber-bg); }
+.temp.hot { color: #fff; background: var(--signal); }
 
 /* ---------------------------------------------------------- stage: the TV */
 .stage { max-width: 720px; margin: 0 auto; padding: 4px 14px 0; }

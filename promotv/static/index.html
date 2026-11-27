@@ -11,7 +11,10 @@
 
 <header class="masthead">
   <div class="brand"><span class="bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>PromoTV</div>
-  <div class="clock" id="clock" title="Час на устройството">--:--</div>
+  <div class="meters">
+    <span class="pill temp hidden" id="temp" title="Температура на Raspberry Pi"></span>
+    <span class="pill clock" id="clock" title="Час на устройството">--:--</span>
+  </div>
 </header>
 
 <section class="stage" aria-label="Телевизорът сега">
@@ -48,6 +51,7 @@
   </ul>
 
   <div class="notice danger hidden" id="dataWarn">Защитата на картата е включена, но папката с файловете не е достъпна за запис. Качените файлове и настройките ще се изгубят при рестарт. Изключете защитата от „Настройки“.</div>
+  <div class="notice hidden" id="healthWarn"></div>
   <div class="notice warn hidden" id="timeWarn">Часът на устройството не е сверен след включване. Отворете панела от браузъра на телефона и той ще се свери сам.</div>
   <div class="notice hidden" id="cnaHint">За големи файлове отворете <b>http://192.168.4.1</b> в Chrome или Safari, а не в прозореца, който се отваря сам. <button class="link" id="cnaClose">Разбрах</button></div>
 </section>
