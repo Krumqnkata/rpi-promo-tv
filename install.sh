@@ -62,6 +62,11 @@ BOOT=/boot/firmware
 [[ -d $BOOT ]] || BOOT=/boot
 CFG="$BOOT/config.txt"
 CMD="$BOOT/cmdline.txt"
+# The SD card protection can leave the boot partition read-only: unlock it for now.
+if findmnt -n -o OPTIONS "$BOOT" 2>/dev/null | tr ',' '\n' | grep -qx ro; then
+  echo "Дялът $BOOT е само за четене – отключвам го временно."
+  mount -o remount,rw "$BOOT"
+fi
 if [[ -f $CFG ]]; then
   cp -n "$CFG" "$CFG.promotv-backup" || true
   if ! grep -q "# PromoTV" "$CFG"; then
@@ -78,13 +83,14 @@ EOF
 fi
 if [[ -f $CMD ]]; then
   cp -n "$CMD" "$CMD.promotv-backup" || true
-  line="$(head -n1 "$CMD")"
+  orig="$(head -n1 "$CMD")"
+  line="$orig"
   for opt in consoleblank=0 logo.nologo vt.global_cursor_default=0; do
     [[ " $line " == *" $opt "* ]] || line="$line $opt"
   done
   # Force 1080p on HDMI even when the TV is in standby at boot (D = force enable).
   [[ " $line " == *" video="* ]] || line="$line video=HDMI-A-1:1920x1080@60D"
-  printf '%s\n' "$line" >"$CMD"
+  [[ "$line" == "$orig" ]] || printf '%s\n' "$line" >"$CMD"
 fi
 
 say "Wi-Fi точка за достъп"

@@ -218,6 +218,8 @@ def system_action(action):
             r = _run(["raspi-config", "nonint", "do_overlayfs", "0" if action == "protect-on" else "1"],
                      timeout=600)
             log.info("raspi-config do_overlayfs: %s %s", r.returncode, r.stdout.strip()[-300:])
+            if action == "protect-off":
+                _run(["raspi-config", "nonint", "disable_bootro"])  # unlock the boot partition too
             _run(["systemctl", "reboot"])
     threading.Thread(target=run, daemon=True).start()
 

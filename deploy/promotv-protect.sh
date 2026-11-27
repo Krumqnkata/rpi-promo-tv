@@ -19,6 +19,11 @@ case "${1:-status}" in
     [ "$1" = on ] && arg=0 || arg=1
     echo "Променям настройката (може да отнеме 1-2 минути)..."
     raspi-config nonint do_overlayfs "$arg"
+    if [ "$1" = off ]; then
+      # do_overlayfs may leave the boot partition read-only; unlock it too,
+      # otherwise updates cannot change config.txt / cmdline.txt.
+      raspi-config nonint disable_bootro 2>/dev/null || true
+    fi
     echo "Рестартиране..."
     systemctl reboot
     ;;
