@@ -9,7 +9,7 @@ from .cec import Cec, FakeCec
 from .media import Library
 from .player import FakePlayer, MpvPlayer
 from .scheduler import Scheduler
-from .tvmenu import TvMenu, rect, text
+from .tvmenu import TvMenu, test_card
 
 log = logging.getLogger(__name__)
 
@@ -41,15 +41,9 @@ class App:
         threading.Thread(target=system.clock_saver, name="clock-saver", daemon=True).start()
 
     def idle_screen(self):
-        w = system.get_wifi()
-        lines = [
-            rect(0, 0, 1920, 1080, "&H141414&"),
-            text(960, 330, "Няма файлове за показване", 72, bold=True, align=8),
-            text(960, 470, f"Свържете се към Wi-Fi „{w['ssid']}“", 52, align=8),
-            text(960, 550, f"парола: {w['password']}", 52, align=8),
-            text(960, 650, f"и отворете http://{config.AP_IP}", 52, "&H00B4FF&", align=8),
-        ]
-        return "\n".join(lines)
+        # No Wi-Fi password here: the screen faces customers. Staff find it in the
+        # TV menu ("Wi-Fi и уеб панел") with the remote.
+        return test_card(system.get_wifi()["ssid"], f"http://{config.AP_IP}")
 
     def _date_watch(self):
         """Start/stop promotions when their dates begin or end (also after clock changes)."""

@@ -53,6 +53,38 @@ def text(x, y, s, size=42, color=C_TEXT, bold=False, align=7):
             f"\\3c&H000000&\\1c{color}}}{esc(s)}")
 
 
+def _bar_x(i):
+    return round(i * 1920 / 7)
+
+
+def test_card(ssid, url):
+    """Retro SMPTE colour bars, shown on the TV when there is nothing to play."""
+    ev = []
+    # top 2/3: grey, yellow, cyan, green, magenta, red, blue (75 %)   colours are &HBBGGRR&
+    top = ["&HC0C0C0&", "&H00C0C0&", "&HC0C000&", "&H00C000&", "&HC000C0&", "&H0000C0&", "&HC00000&"]
+    for i, c in enumerate(top):
+        ev.append(rect(_bar_x(i), 0, _bar_x(i + 1) - _bar_x(i), 720, c))
+    # thin middle strip: blue, black, magenta, black, cyan, black, grey
+    mid = ["&HC00000&", "&H131313&", "&HC000C0&", "&H131313&", "&HC0C000&", "&H131313&", "&HC0C0C0&"]
+    for i, c in enumerate(mid):
+        ev.append(rect(_bar_x(i), 720, _bar_x(i + 1) - _bar_x(i), 90, c))
+    # bottom: -I, white, +Q, black, then the "pluge" (three near-black steps), black
+    w = _bar_x(5) / 4
+    for i, c in enumerate(["&H4C2100&", "&HFFFFFF&", "&H6A0032&", "&H131313&"]):
+        ev.append(rect(round(i * w), 810, round((i + 1) * w) - round(i * w), 270, c))
+    step = (_bar_x(6) - _bar_x(5)) / 3
+    for i, c in enumerate(["&H090909&", "&H131313&", "&H1D1D1D&"]):
+        x0 = round(_bar_x(5) + i * step)
+        ev.append(rect(x0, 810, round(_bar_x(5) + (i + 1) * step) - x0, 270, c))
+    ev.append(rect(_bar_x(6), 810, 1920 - _bar_x(6), 270, "&H131313&"))
+    # caption box in the middle
+    ev.append(rect(360, 270, 1200, 300, "&H101010&", "&H10&"))
+    ev.append(text(960, 305, "Няма файлове за показване", 68, bold=True, align=8))
+    ev.append(text(960, 410, f"Wi-Fi „{ssid}“", 46, align=8))
+    ev.append(text(960, 475, url, 46, C_ACCENT, align=8))
+    return "\n".join(ev)
+
+
 class TvMenu:
     def __init__(self, app):
         self.app = app
