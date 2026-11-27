@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16181d">
+<title>PromoTV – панел</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-row">
+    <div class="brand">PromoTV</div>
+    <div class="clock" id="clock">--:--</div>
+  </div>
+  <div class="now">
+    <div class="now-label">Сега на екрана</div>
+    <div class="now-file" id="nowFile">—</div>
+    <div class="chips">
+      <span class="chip" id="chipTv">ТВ: ?</span>
+      <span class="chip" id="chipMode">Режим</span>
+      <span class="chip" id="chipSched">График</span>
+    </div>
+  </div>
+  <div class="controls">
+    <button class="ctl" data-player="prev" aria-label="Предишен"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+    <button class="ctl ctl-main" id="btnPause" data-player="toggle" aria-label="Пауза"><svg viewBox="0 0 24 24" id="icoPause"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg></button>
+    <button class="ctl" data-player="next" aria-label="Следващ"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
+    <span class="sep"></span>
+    <button class="ctl tv-on" data-tv="on">ТВ вкл.</button>
+    <button class="ctl tv-off" data-tv="off">ТВ изкл.</button>
+  </div>
+  <div class="banner warn hidden" id="timeWarn">Часът на устройството не е сверен. Отворете панела в браузъра на телефона, за да се свери автоматично.</div>
+  <div class="banner note hidden" id="cnaHint">За качване на големи файлове отворете <b>http://192.168.4.1</b> в Chrome / Safari.</div>
+</header>
+
+<nav class="tabs">
+  <button class="tab active" data-tab="files">Файлове</button>
+  <button class="tab" data-tab="play">Показване</button>
+  <button class="tab" data-tab="schedule">График</button>
+  <button class="tab" data-tab="settings">Настройки</button>
+</nav>
+
+<main>
+  <!-- FILES -->
+  <section id="tab-files" class="panel">
+    <label class="upload" id="dropZone">
+      <input type="file" id="fileInput" multiple accept="video/*,image/*,.mkv,.mov,.avi,.webm,.ts">
+      <span class="upload-title">+ Качи видеа или снимки</span>
+      <span class="upload-sub">Препоръчано: MP4 (H.264), до 1920×1080, до 30 кадъра/сек</span>
+    </label>
+    <div id="uploads"></div>
+    <div class="list-head">
+      <span id="filesCount">Файлове</span>
+      <span class="disk" id="disk"></span>
+    </div>
+    <ul class="files" id="files"></ul>
+    <p class="empty hidden" id="filesEmpty">Още няма качени файлове.</p>
+  </section>
+
+  <!-- PLAYBACK -->
+  <section id="tab-play" class="panel hidden">
+    <h2>Как да се показват файловете</h2>
+    <div class="radio-group" id="modeGroup">
+      <label class="radio"><input type="radio" name="mode" value="all"><span><b>Целия списък по ред</b><small>Файловете се въртят в реда от „Файлове“.</small></span></label>
+      <label class="radio"><input type="radio" name="mode" value="shuffle"><span><b>Разбъркано</b><small>Всички включени файлове в случаен ред.</small></span></label>
+      <label class="radio"><input type="radio" name="mode" value="single"><span><b>Само един файл в цикъл</b><small>Избраният файл се повтаря непрекъснато.</small></span></label>
+    </div>
+    <div class="field hidden" id="singleField">
+      <label for="singleFile">Файл</label>
+      <select id="singleFile"></select>
+    </div>
+    <div class="field">
+      <label for="imageDuration">Колко секунди да стои всяка снимка</label>
+      <input type="number" id="imageDuration" min="1" max="3600" inputmode="numeric">
+    </div>
+    <div class="field">
+      <label for="volume">Сила на звука: <b id="volumeVal">100</b>%</label>
+      <input type="range" id="volume" min="0" max="100" step="5">
+    </div>
+    <button class="primary" id="savePlayback">Запази</button>
+  </section>
+
+  <!-- SCHEDULE -->
+  <section id="tab-schedule" class="panel hidden">
+    <label class="switch-row">
+      <span><b>Автоматично включване и изключване</b><small>Телевизорът се включва и изключва по HDMI-CEC.</small></span>
+      <input type="checkbox" class="switch" id="schedEnabled">
+    </label>
+    <p class="next" id="schedNext"></p>
+    <div class="days" id="days"></div>
+    <div class="row-btns">
+      <button class="secondary" id="copyWeekdays">Пн → всички делнични</button>
+      <button class="secondary" id="copyAll">Пн → всички дни</button>
+    </div>
+    <p class="hint">Ако часът за изключване е по-ранен от този за включване (напр. 18:00 – 02:00), телевизорът се изключва на следващия ден.</p>
+    <button class="primary" id="saveSchedule">Запази графика</button>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="tab-settings" class="panel hidden">
+    <h2>Wi-Fi мрежа</h2>
+    <div class="field">
+      <label for="wifiSsid">Име на мрежата</label>
+      <input type="text" id="wifiSsid" maxlength="32" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="wifiPass">Парола (поне 8 символа)</label>
+      <input type="text" id="wifiPass" maxlength="63" autocomplete="off" autocapitalize="off" spellcheck="false">
+    </div>
+    <p class="hint">След запазване връзката ще прекъсне – свържете се отново с новото име и парола.</p>
+    <button class="primary" id="saveWifi">Запази Wi-Fi</button>
+
+    <h2>Устройство</h2>
+    <dl class="info" id="sysInfo"></dl>
+    <div class="row-btns">
+      <button class="secondary" data-sys="restart">Рестарт на плеъра</button>
+      <button class="secondary" data-sys="reboot">Рестарт на Raspberry Pi</button>
+      <button class="danger" data-sys="shutdown">Изключи Raspberry Pi</button>
+    </div>
+    <p class="hint">Управление от телевизора: натиснете OK или ▲ на дистанционното на телевизора, за да отворите менюто. ◄ / ► сменят файла.</p>
+  </section>
+</main>
+
+<div class="toast hidden" id="toast"></div>
+
+<dialog id="renameDialog">
+  <form method="dialog">
+    <h3>Преименуване</h3>
+    <input type="text" id="renameInput" maxlength="120">
+    <div class="row-btns">
+      <button value="cancel" class="secondary">Отказ</button>
+      <button value="ok" class="primary">Запази</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
