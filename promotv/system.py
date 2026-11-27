@@ -57,7 +57,92 @@ def set_time(epoch, source="phone"):
             f.write(source)
     except OSError:
         pass
+    save_clock()
     return diff
+
+
+def save_clock():
+    """Remember the current time on the data partition. With the read-only system
+    fake-hwclock cannot save it, so after a power cut we restore at least this."""
+    try:
+        tmp = config.CLOCK_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(f"{now():.0f}\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, config.CLOCK_FILE)
+    except OSError as e:
+        log.warning("Cannot save clock: %s", e)
+
+
+def restore_clock():
+    """At start-up: if the clock is behind the last saved time, move it forward."""
+    global _dev_offset
+    try:
+        with open(config.CLOCK_FILE) as f:
+            saved = float(f.read().strip())
+    except (OSError, ValueError):
+        return
+    if saved > now() + 60:
+        log.info("Clock is behind the last saved time, restoring %+.0f s", saved - now())
+        if config.DEV:
+            _dev_offset += saved - now()
+        else:
+            _run(["date", "-u", "-s", f"@{saved:.0f}"])
+
+
+def clock_saver():
+    while True:
+        time.sleep(600)
+        save_clock()
+
+
+# ---------------- HDMI signal ----------------
+_FB_BLANK = "/sys/class/graphics/fb0/blank"
+
+
+def hdmi_power(on):
+    """Switch the HDMI signal on/off through the kernel console (mpv must not be running)."""
+    if config.DEV:
+        log.info("[dev] HDMI signal %s", "on" if on else "off")
+        return True
+    try:
+        with open(_FB_BLANK, "w") as f:
+            f.write("0" if on else "4")   # 4 = FB_BLANK_POWERDOWN
+        return True
+    except OSError as e:
+        log.warning("Cannot switch HDMI %s: %s", "on" if on else "off", e)
+        return False
+
+
+# ---------------- SD card protection (read-only root) ----------------
+def _boot_cmdline():
+    for p in ("/boot/firmware/cmdline.txt", "/boot/cmdline.txt"):
+        try:
+            with open(p) as f:
+                return f.read()
+        except OSError:
+            continue
+    return ""
+
+
+def protection_status():
+    if config.DEV:
+        return {"active": False, "next_boot": False, "data_persistent": True, "supported": False}
+    try:
+        with open("/proc/mounts") as f:
+            root_overlay = any(line.split()[1] == "/" and line.split()[2] == "overlay"
+                               for line in f if len(line.split()) > 2)
+    except OSError:
+        root_overlay = False
+    return {
+        "active": root_overlay,
+        "next_boot": "overlayroot=" in _boot_cmdline(),
+        # With the overlay active the data folder must be a separate (bind) mount,
+        # otherwise uploads would only live in RAM.
+        "data_persistent": (not root_overlay) or os.path.ismount(config.DATA_DIR),
+        "supported": shutil.which("raspi-config") is not None,
+    }
 
 
 # ---------------- network ----------------
@@ -128,6 +213,12 @@ def system_action(action):
             _run(["systemctl", "poweroff"])
         elif action == "restart":
             _run(["systemctl", "restart", "promotv"])
+        elif action in ("protect-on", "protect-off"):
+            # raspi-config rebuilds the initramfs, which takes a while on a Pi 3.
+            r = _run(["raspi-config", "nonint", "do_overlayfs", "0" if action == "protect-on" else "1"],
+                     timeout=600)
+            log.info("raspi-config do_overlayfs: %s %s", r.returncode, r.stdout.strip()[-300:])
+            _run(["systemctl", "reboot"])
     threading.Thread(target=run, daemon=True).start()
 
 

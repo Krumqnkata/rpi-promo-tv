@@ -23,6 +23,13 @@ if ! command -v nmcli >/dev/null; then
   echo "NetworkManager (nmcli) липсва. Нужен е Raspberry Pi OS Bookworm или по-нов." >&2
   exit 1
 fi
+if [[ "$(findmnt -n -o FSTYPE /)" == "overlay" ]]; then
+  echo "Защитата на SD картата е включена – промените няма да се запазят." >&2
+  echo "Изключете я с:  sudo promotv-protect off   (Пи-то ще се рестартира)," >&2
+  echo "после стартирайте инсталацията отново." >&2
+  exit 1
+fi
+PROTECT="${PROTECT:-1}"
 
 say "Инсталиране на пакети (може да отнеме няколко минути)"
 export DEBIAN_FRONTEND=noninteractive
@@ -30,6 +37,8 @@ apt-get update
 apt-get install -y --no-install-recommends \
   mpv ffmpeg cec-utils python3 python3-flask python3-qrcode \
   fonts-dejavu-core dnsmasq-base network-manager fake-hwclock
+# Needed later for the read-only system (installed now, while there is internet).
+apt-get install -y overlayroot || echo "overlayroot не е наличен – raspi-config ще опита сам."
 
 say "Копиране на програмата в $APP_DIR"
 rm -rf "$APP_DIR/promotv"
@@ -37,7 +46,13 @@ mkdir -p "$APP_DIR" "$DATA_DIR"/{media,thumbs,tmp} /etc/promotv
 cp -r "$SRC/promotv" "$APP_DIR/"
 find "$APP_DIR" -name '__pycache__' -prune -exec rm -rf {} +
 [[ -f /etc/promotv/mpv.conf ]] || cp "$SRC/deploy/mpv.conf" /etc/promotv/mpv.conf
-cp "$SRC/deploy/promotv.service" /etc/systemd/system/promotv.service
+cp "$SRC/deploy/promotv.service" "$SRC/deploy/promotv-data.service" /etc/systemd/system/
+install -m 755 "$SRC/deploy/promotv-data.sh" /usr/local/sbin/promotv-data
+install -m 755 "$SRC/deploy/promotv-protect.sh" /usr/local/sbin/promotv-protect
+
+say "Watchdog: автоматичен рестарт при забиване"
+mkdir -p /etc/systemd/system.conf.d
+cp "$SRC/deploy/watchdog.conf" /etc/systemd/system.conf.d/promotv-watchdog.conf
 
 say "Часова зона: $TIMEZONE"
 timedatectl set-timezone "$TIMEZONE" || true
@@ -116,12 +131,27 @@ done < <(nmcli -t -f NAME,TYPE connection show)
 
 say "Стартиране на услугата"
 systemctl daemon-reload
-systemctl enable promotv.service
+systemctl enable promotv-data.service promotv.service
 # Free the HDMI console so mpv can use the screen.
 systemctl disable --now getty@tty1.service 2>/dev/null || true
 
 PSK="$(nmcli -s -g 802-11-wireless-security.psk connection show "$CON")"
 SSID="$(nmcli -g 802-11-wireless.ssid connection show "$CON")"
+
+PROTECT_MSG="Защита на SD картата: ИЗКЛЮЧЕНА (PROTECT=0)."
+if [[ $PROTECT == 1 ]]; then
+  if command -v raspi-config >/dev/null; then
+    say "Защита на SD картата (системата става само за четене след рестарт)"
+    if raspi-config nonint do_overlayfs 0; then
+      PROTECT_MSG="Защита на SD картата: ВКЛЮЧЕНА след рестарта.
+ За обновяване първо я изключете:  sudo promotv-protect off"
+    else
+      PROTECT_MSG="Защитата на SD картата НЕ можа да се включи – вижте съобщенията по-горе."
+    fi
+  else
+    PROTECT_MSG="raspi-config липсва – защитата на SD картата не е включена."
+  fi
+fi
 
 cat <<EOF
 
@@ -135,6 +165,8 @@ cat <<EOF
 
  Паролата се вижда и на телевизора: OK на дистанционното ->
  "Wi-Fi и уеб панел".
+
+ $PROTECT_MSG
 
  ВНИМАНИЕ: ако сте свързани по Wi-Fi през SSH, след рестарта
  връзката ще прекъсне – Wi-Fi чипът става точка за достъп.

@@ -21,6 +21,11 @@
       <span class="chip" id="chipMode">Режим</span>
       <span class="chip" id="chipSched">График</span>
     </div>
+    <button class="screen-btn" id="screenBtn" aria-expanded="false">Покажи екрана</button>
+    <div class="screen hidden" id="screenBox">
+      <img id="screenImg" alt="Текущ кадър на телевизора">
+      <div class="screen-bar"><span id="screenInfo"></span><button id="screenRefresh">Обнови</button></div>
+    </div>
   </div>
   <div class="controls">
     <button class="ctl" data-player="prev" aria-label="Предишен"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
@@ -30,6 +35,7 @@
     <button class="ctl tv-on" data-tv="on">ТВ вкл.</button>
     <button class="ctl tv-off" data-tv="off">ТВ изкл.</button>
   </div>
+  <div class="banner danger hidden" id="dataWarn">Внимание: защитата на картата е включена, но папката с файловете не е достъпна за запис – качените файлове и настройките ще се изгубят при рестарт. Изключете защитата от „Настройки“.</div>
   <div class="banner warn hidden" id="timeWarn">Часът на устройството не е сверен. Отворете панела в браузъра на телефона, за да се свери автоматично.</div>
   <div class="banner note hidden" id="cnaHint">За качване на големи файлове отворете <b>http://192.168.4.1</b> в Chrome / Safari.</div>
 </header>
@@ -78,6 +84,14 @@
       <label for="volume">Сила на звука: <b id="volumeVal">100</b>%</label>
       <input type="range" id="volume" min="0" max="100" step="5">
     </div>
+    <label class="switch-row field">
+      <span><b>Плавен преход</b><small>Затъмняване между снимките и плавно появяване на всеки файл.</small></span>
+      <input type="checkbox" class="switch" id="fade">
+    </label>
+    <div class="field" id="fadeField">
+      <label for="fadeDuration">Продължителност на прехода: <b id="fadeVal">0.6</b> сек</label>
+      <input type="range" id="fadeDuration" min="0.2" max="2" step="0.1">
+    </div>
     <button class="primary" id="savePlayback">Запази</button>
   </section>
 
@@ -111,6 +125,26 @@
     <p class="hint">След запазване връзката ще прекъсне – свържете се отново с новото име и парола.</p>
     <button class="primary" id="saveWifi">Запази Wi-Fi</button>
 
+    <h2>Изключване на телевизора</h2>
+    <div class="radio-group">
+      <label class="radio"><input type="radio" name="powerMode" value="auto"><span><b>Автоматично (препоръчано)</b><small>Изключва по HDMI-CEC. Ако телевизорът не потвърди, че е изключен, Пи-то спира и HDMI сигнала – телевизорът сам заспива при „няма сигнал“.</small></span></label>
+      <label class="radio"><input type="radio" name="powerMode" value="cec"><span><b>Само HDMI-CEC</b><small>Само команда към телевизора, сигналът не се спира.</small></span></label>
+      <label class="radio"><input type="radio" name="powerMode" value="hdmi"><span><b>Само спиране на HDMI сигнала</b><small>За телевизори без работещ CEC. Телевизорът трябва да има „автоматично изключване при липса на сигнал“.</small></span></label>
+    </div>
+    <button class="primary" id="savePower">Запази</button>
+
+    <h2>Защита на SD картата</h2>
+    <div class="protect" id="protectBox"></div>
+    <p class="hint">Когато е включена, системата е „само за четене“ и спирането на тока не може да я повреди. Видеата и настройките се записват нормално. За обновяване на програмата защитата трябва временно да се изключи. Всяка промяна рестартира Пи-то.</p>
+
+    <h2>Резервно копие</h2>
+    <p class="hint">Записва подредбата, периодите, графика и настройките (без самите видеа). При възстановяване на друго Пи първо качете файловете със същите имена.</p>
+    <div class="row-btns">
+      <a class="secondary btn-link" href="/api/backup" download>Изтегли копие</a>
+      <label class="secondary btn-link">Възстанови от файл<input type="file" id="restoreFile" accept=".json,application/json" hidden></label>
+    </div>
+    <label class="check"><input type="checkbox" id="restoreWifi"> Възстанови и името и паролата на Wi-Fi</label>
+
     <h2>Устройство</h2>
     <dl class="info" id="sysInfo"></dl>
     <div class="row-btns">
@@ -129,6 +163,27 @@
     <h3>Преименуване</h3>
     <input type="text" id="renameInput" maxlength="120">
     <div class="row-btns">
+      <button value="cancel" class="secondary">Отказ</button>
+      <button value="ok" class="primary">Запази</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="datesDialog">
+  <form method="dialog">
+    <h3>Период на показване</h3>
+    <p class="hint" id="datesName"></p>
+    <div class="field">
+      <label for="dateStart">От дата (включително)</label>
+      <input type="date" id="dateStart">
+    </div>
+    <div class="field">
+      <label for="dateEnd">До дата (включително)</label>
+      <input type="date" id="dateEnd">
+    </div>
+    <p class="hint">Празно поле = без ограничение. След крайната дата файлът спира да се показва сам, но не се изтрива.</p>
+    <div class="row-btns">
+      <button value="clear" class="secondary">Без период</button>
       <button value="cancel" class="secondary">Отказ</button>
       <button value="ok" class="primary">Запази</button>
     </div>

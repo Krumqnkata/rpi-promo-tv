@@ -8,12 +8,38 @@ import re
 import shutil
 import subprocess
 import threading
+from datetime import date, datetime
 
-from . import config
+from . import config, system
 
 log = logging.getLogger(__name__)
 
 _BAD_CHARS = re.compile(r'[\x00-\x1f/\\:*?"<>|]')
+
+
+def parse_date(value):
+    """'YYYY-MM-DD' -> same string (validated), empty -> None."""
+    if value in (None, ""):
+        return None
+    return date.fromisoformat(str(value)).isoformat()
+
+
+def make_item(file, enabled=True, start=None, end=None):
+    return {"file": file, "enabled": bool(enabled), "start": start, "end": end}
+
+
+def today():
+    return datetime.fromtimestamp(system.now()).date().isoformat()
+
+
+def date_status(item, day=None):
+    """active | upcoming | expired, according to the item's start/end dates (inclusive)."""
+    day = day or today()
+    if item.get("start") and day < item["start"]:
+        return "upcoming"
+    if item.get("end") and day > item["end"]:
+        return "expired"
+    return "active"
 
 
 def media_type(name):
@@ -209,11 +235,12 @@ class Library:
             pl = []
             for item in d["playlist"]:
                 if item["file"] in on_disk and item["file"] not in seen:
-                    pl.append({"file": item["file"], "enabled": bool(item.get("enabled", True))})
+                    pl.append(make_item(item["file"], item.get("enabled", True),
+                                        item.get("start"), item.get("end")))
                     seen.add(item["file"])
             for f in files:
                 if f not in seen:
-                    pl.append({"file": f, "enabled": True})
+                    pl.append(make_item(f))
             changed = pl != d["playlist"]
             d["playlist"] = pl
             if d["single_file"] not in on_disk:
@@ -248,6 +275,7 @@ class Library:
 
     def list(self):
         pl = self.state.get("playlist")
+        day = today()
         out = []
         with self._lock:
             for item in pl:
@@ -261,6 +289,9 @@ class Library:
                 out.append({
                     "name": name,
                     "enabled": item["enabled"],
+                    "start": item.get("start"),
+                    "end": item.get("end"),
+                    "date_status": date_status(item, day),
                     "type": media_type(name),
                     "size": size,
                     "duration": info.get("duration"),
@@ -279,7 +310,9 @@ class Library:
         st = self.state.get()
         if st["mode"] == "single":
             return [st["single_file"]] if st["single_file"] and self.exists(st["single_file"]) else []
-        return [i["file"] for i in st["playlist"] if i["enabled"] and self.exists(i["file"])]
+        day = today()
+        return [i["file"] for i in st["playlist"]
+                if i["enabled"] and date_status(i, day) == "active" and self.exists(i["file"])]
 
     # ---------- mutations ----------
     def add_uploaded(self, tmp_path, original_name):
@@ -342,8 +375,42 @@ class Library:
             for name in order:
                 if name in current:
                     item = current.pop(name)
-                    pl.append({"file": name, "enabled": bool(enabled.get(name, item["enabled"]))})
+                    item["enabled"] = bool(enabled.get(name, item["enabled"]))
+                    pl.append(item)
             pl.extend(current.values())  # anything the client did not know about
+            d["playlist"] = pl
+        self.state.update(apply)
+        self._notify()
+
+    def set_dates(self, name, start, end):
+        start, end = parse_date(start), parse_date(end)
+        if start and end and end < start:
+            raise ValueError("Крайната дата е преди началната.")
+
+        def apply(d):
+            for item in d["playlist"]:
+                if item["file"] == name:
+                    item["start"], item["end"] = start, end
+                    return True
+            return False
+        if not self.state.update(apply):
+            raise FileNotFoundError(name)
+        self._notify()
+
+    def import_playlist(self, items):
+        """Apply order/enabled/dates from a backup to the files that exist here."""
+        clean = []
+        for i in items:
+            try:
+                clean.append(make_item(str(i["file"]), i.get("enabled", True),
+                                       parse_date(i.get("start")), parse_date(i.get("end"))))
+            except (KeyError, TypeError, ValueError):
+                continue
+
+        def apply(d):
+            current = {i["file"]: i for i in d["playlist"]}
+            pl = [i for i in clean if current.pop(i["file"], None) is not None]
+            pl.extend(current.values())
             d["playlist"] = pl
         self.state.update(apply)
         self._notify()

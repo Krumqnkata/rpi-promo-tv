@@ -9,13 +9,21 @@ import subprocess
 import threading
 import time
 
-from . import config
+from . import config, system
+from .media import media_type
 
 log = logging.getLogger(__name__)
 
 OVERLAY_MENU = 1
 OVERLAY_IDLE = 2
 OVERLAY_TOAST = 3
+OVERLAY_FADE = 4
+
+
+def _black(alpha):
+    """Full screen black rectangle; alpha 0 = opaque, 255 = transparent."""
+    return (f"{{\\an7\\pos(0,0)\\bord0\\shad0\\1c&H000000&\\1a&H{int(alpha):02X}&\\p1}}"
+            "m 0 0 l 1920 0 1920 1080 0 1080{\\p0}")
 
 
 class BasePlayer:
@@ -28,6 +36,7 @@ class BasePlayer:
         self.files = []          # what is currently loaded, in order
         self.loaded_mode = None
         self.idle_text = None    # ASS text shown when there is nothing to play
+        self.output_on = True    # False = HDMI signal switched off
         library.on_change.append(self.reload)
 
     # --- to be implemented ---
@@ -41,13 +50,15 @@ class BasePlayer:
     def overlay(self, oid, ass_text, z=0): ...
     def set_volume(self, vol): ...
     def set_image_duration(self, sec): ...
+    def screenshot(self, path): return False
+    def set_output(self, on): self.output_on = bool(on)
 
     def toggle_pause(self):
         self.set_pause(not self.is_paused())
 
     def status(self):
         return {"current": self.current(), "paused": self.is_paused(),
-                "count": len(self.files), "mode": self.loaded_mode}
+                "count": len(self.files), "mode": self.loaded_mode, "output": self.output_on}
 
     def build_list(self):
         files = self.library.play_list()
@@ -55,6 +66,10 @@ class BasePlayer:
         if mode == "shuffle":
             random.shuffle(files)
         return mode, files
+
+    def needs_reload(self):
+        """True when dates/settings changed which files should be playing."""
+        return set(self.library.play_list()) != set(self.files)
 
 
 class MpvPlayer(BasePlayer):
@@ -68,6 +83,9 @@ class MpvPlayer(BasePlayer):
         self._pending = {}
         self._props = {}
         self._overlays = {}
+        self._fade_gen = 0
+        self._output_event = threading.Event()
+        self._resume_file = None
 
     # ---------- process management ----------
     def _args(self):
@@ -81,6 +99,7 @@ class MpvPlayer(BasePlayer):
             f"--image-display-duration={st['image_duration']}",
             f"--volume={st['volume']}",
             "--osd-font=DejaVu Sans",
+            "--screenshot-format=jpg", "--screenshot-jpeg-quality=80",
         ]
         if os.path.isfile(config.MPV_CONF):
             args.append(f"--include={config.MPV_CONF}")
@@ -94,27 +113,61 @@ class MpvPlayer(BasePlayer):
             log.error("mpv is not installed")
             return
         while True:
+            while not self.output_on:
+                self._output_event.wait()
+                self._output_event.clear()
             try:
                 os.remove(self.sock_path)
             except FileNotFoundError:
                 pass
             log.info("Starting mpv")
+            self._props = {}
             self.proc = subprocess.Popen(self._args(), stdin=subprocess.DEVNULL)
             if self._connect():
                 reader = threading.Thread(target=self._read_loop, name="mpv-ipc", daemon=True)
                 reader.start()
                 self.loaded_mode = None
                 self.files = []
+                self._overlays.pop(OVERLAY_FADE, None)
                 self._overlays_restore()
                 self.reload()
+                if self._resume_file:
+                    time.sleep(0.5)
+                    self.jump_to(self._resume_file)
+                    self._resume_file = None
                 reader.join()  # returns when mpv dies
             self.sock = None
             try:
                 self.proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self.proc.kill()
+                self.proc.wait()
+            if not self.output_on:
+                log.info("mpv stopped (HDMI output off)")
+                continue
             log.warning("mpv exited (code %s), restarting in 3 s", self.proc.returncode)
             time.sleep(3)
+
+    def set_output(self, on):
+        """Switch the HDMI signal off (stops mpv, blanks the console) or back on."""
+        on = bool(on)
+        if on == self.output_on:
+            return
+        if not on:
+            self._resume_file = self.current()
+            self.output_on = False
+            if self.proc and self.proc.poll() is None:
+                self.proc.terminate()
+                try:
+                    self.proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.proc.kill()
+            time.sleep(0.5)
+            system.hdmi_power(False)
+        else:
+            system.hdmi_power(True)
+            self.output_on = True
+            self._output_event.set()
 
     def _connect(self):
         for _ in range(100):
@@ -149,8 +202,13 @@ class MpvPlayer(BasePlayer):
                     msg = json.loads(line)
                 except ValueError:
                     continue
-                if msg.get("event") == "property-change":
+                event = msg.get("event")
+                if event == "property-change":
                     self._props[msg.get("name")] = msg.get("data")
+                elif event == "start-file":
+                    self._fade_start_file()
+                elif event == "playback-restart":
+                    self._fade_playback_restart()
                 elif "request_id" in msg:
                     waiter = self._pending.pop(msg["request_id"], None)
                     if waiter:
@@ -158,7 +216,7 @@ class MpvPlayer(BasePlayer):
                         waiter[0].set()
 
     # ---------- IPC ----------
-    def _send(self, payload, wait=False):
+    def _send(self, payload, wait=False, timeout=3):
         sock = self.sock
         if sock is None:
             return None
@@ -175,7 +233,7 @@ class MpvPlayer(BasePlayer):
                 log.warning("mpv IPC send failed: %s", e)
                 self._pending.pop(rid, None)
                 return None
-        if waiter and waiter[0].wait(3):
+        if waiter and waiter[0].wait(timeout):
             return waiter[1]
         return None
 
@@ -264,6 +322,57 @@ class MpvPlayer(BasePlayer):
     def set_image_duration(self, sec):
         self.set_prop("image-display-duration", int(sec))
 
+    def screenshot(self, path):
+        """Save the current video frame (without menus) as JPEG. Returns True on success."""
+        if self.sock is None or not self.current():
+            return False
+        resp = self._send({"command": ["screenshot-to-file", path, "video"]}, wait=True, timeout=10)
+        return bool(resp) and resp.get("error") == "success" and os.path.isfile(path)
+
+    # ---------- fade transitions ----------
+    def _fade_enabled(self):
+        st = self.state.get()
+        return st["fade"] and st["mode"] != "single" and len(self.files) > 1
+
+    def _fade_start_file(self):
+        """A new file is starting: cover the screen with black until its first frame."""
+        self._fade_gen += 1
+        if self._fade_enabled():
+            self.overlay(OVERLAY_FADE, _black(0))
+        else:
+            self.overlay(OVERLAY_FADE, None)
+
+    def _fade_playback_restart(self):
+        """First frame is on screen: fade in, and for images schedule the fade out."""
+        self._fade_gen += 1
+        gen = self._fade_gen
+        if OVERLAY_FADE not in self._overlays:
+            return
+        st = self.state.get()
+        dur = max(0.1, float(st["fade_duration"]))
+        is_image = media_type(self.current() or "") == "image"
+        hold = st["image_duration"] - dur
+
+        def run():
+            self._animate(gen, 0, 255, dur)
+            if is_image and hold > dur:
+                time.sleep(hold - dur)
+                if gen == self._fade_gen and not self.is_paused() and self._fade_enabled():
+                    self._animate(gen, 255, 0, dur)
+        threading.Thread(target=run, daemon=True).start()
+
+    def _animate(self, gen, start, end, duration):
+        steps = max(2, int(duration / 0.05))
+        for i in range(steps + 1):
+            if gen != self._fade_gen:
+                return
+            alpha = start + (end - start) * i / steps
+            if alpha >= 255:
+                self.overlay(OVERLAY_FADE, None)
+            else:
+                self.overlay(OVERLAY_FADE, _black(alpha))
+            time.sleep(duration / steps)
+
     # ---------- OSD ----------
     def overlay(self, oid, ass_text, z=0):
         if ass_text:
@@ -336,3 +445,17 @@ class FakePlayer(BasePlayer):
 
     def set_idle_text(self, text):
         self.idle_text = text
+
+    def screenshot(self, path):
+        """Dev mode: use the thumbnail of the current file, if there is one."""
+        from .media import thumb_id
+        cur = self.current()
+        src = os.path.join(config.THUMB_DIR, thumb_id(cur) + ".jpg") if cur else None
+        if src and os.path.isfile(src):
+            shutil.copyfile(src, path)
+            return True
+        return False
+
+    def set_output(self, on):
+        system.hdmi_power(on)
+        self.output_on = bool(on)

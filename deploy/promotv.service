@@ -1,15 +1,21 @@
 [Unit]
 Description=PromoTV - video player, TV control and web panel
-After=network.target NetworkManager.service sound.target
+After=network.target NetworkManager.service sound.target promotv-data.service
 Wants=NetworkManager.service
+Wants=promotv-data.service
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=all
 WorkingDirectory=/opt/promotv
 ExecStart=/usr/bin/python3 -m promotv
 Environment=PYTHONUNBUFFERED=1
 Environment=TMPDIR=/var/lib/promotv/tmp
 RuntimeDirectory=promotv
+# The app pings systemd every 15 s while its web server answers;
+# if it hangs for 90 s it is killed and restarted.
+WatchdogSec=90
+TimeoutStartSec=180
 Restart=always
 RestartSec=3
 

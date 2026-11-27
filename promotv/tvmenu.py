@@ -176,7 +176,7 @@ class TvMenu:
         st = self.app.state.get()
         if st["mode"] == "single":
             return [i["file"] for i in st["playlist"]]
-        return [i["file"] for i in st["playlist"] if i["enabled"]]
+        return self.app.library.play_list()
 
     def _key_files(self, key):
         files = self._file_choices()
@@ -346,6 +346,7 @@ class TvMenu:
             ("Свободно:", f"{disk['free'] / 1e9:.1f} GB от {disk['total'] / 1e9:.1f} GB"),
             ("IP:", ", ".join(system.ip_addresses())),
             ("CEC:", "работи" if a.cec.available else "не отговаря"),
+            ("Защита SD:", "включена" if system.protection_status()["active"] else "изключена"),
         ]
         ev, x, y = self._frame("Информация", 120 + len(rows) * 66 + 90, width=1300)
         for i, (k, v) in enumerate(rows):

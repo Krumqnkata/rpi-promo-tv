@@ -1,15 +1,18 @@
 """Web panel (Flask) + captive portal redirects."""
+import json
 import logging
 import os
 import re
+import threading
+import time
 import uuid
 from datetime import datetime
 from urllib.parse import unquote
 
-from flask import Flask, abort, jsonify, redirect, request, send_from_directory
+from flask import Flask, Response, abort, jsonify, redirect, request, send_from_directory
 
 from . import __version__, config, scheduler, system
-from .media import media_type
+from .media import date_status, media_type
 
 log = logging.getLogger(__name__)
 
@@ -25,6 +28,7 @@ CAPTIVE_PATHS = {
 def create_web(app):
     web = Flask(__name__, static_folder=STATIC, static_url_path="/static")
     web.config["MAX_CONTENT_LENGTH"] = None
+    shot_lock = threading.Lock()
 
     def err(message, code=400):
         return jsonify({"error": message}), code
@@ -70,9 +74,15 @@ def create_web(app):
                 "next": {"kind": nxt[0], "day": nxt[1].weekday(), "time": nxt[1].strftime("%H:%M"),
                          "date": nxt[1].strftime("%d.%m")} if nxt else None,
             },
-            "settings": {k: st[k] for k in ("mode", "single_file", "image_duration", "volume")},
+            "settings": {k: st[k] for k in ("mode", "single_file", "image_duration", "volume",
+                                            "fade", "fade_duration", "power_off_mode")},
             "disk": system.disk_usage(),
+            "protection": system.protection_status(),
         })
+
+    @web.get("/api/ping")
+    def ping():
+        return jsonify({"ok": True})
 
     @web.post("/api/time")
     def set_time():
@@ -145,10 +155,23 @@ def create_web(app):
             return err("Няма такъв файл", 404)
         st = app.state.get()
         if st["mode"] != "single":
-            enabled = {i["file"]: i["enabled"] for i in st["playlist"]}
-            if not enabled.get(name):
+            item = next((i for i in st["playlist"] if i["file"] == name), None)
+            if item and date_status(item) != "active":
+                return err("Файлът е извън периода си на показване – променете периода.")
+            if item and not item["enabled"]:
                 app.library.set_playlist([i["file"] for i in st["playlist"]], {name: True})
         app.player.jump_to(name)
+        return jsonify({"ok": True})
+
+    @web.post("/api/files/<path:name>/dates")
+    def dates(name):
+        data = request.get_json(force=True, silent=True) or {}
+        try:
+            app.library.set_dates(name, data.get("start"), data.get("end"))
+        except FileNotFoundError:
+            return err("Няма такъв файл", 404)
+        except ValueError as e:
+            return err(str(e) if "дата" in str(e) else "Невалидна дата")
         return jsonify({"ok": True})
 
     @web.post("/api/playlist")
@@ -188,21 +211,44 @@ def create_web(app):
     def playback():
         data = request.get_json(force=True, silent=True) or {}
         try:
-            dur = int(data.get("image_duration", app.state.get("image_duration")))
-            vol = int(data.get("volume", app.state.get("volume")))
-        except (TypeError, ValueError):
-            return err("Невалидна стойност")
-        if not 1 <= dur <= 3600:
-            return err("Времето за снимка трябва да е между 1 и 3600 секунди.")
-        vol = max(0, min(100, vol))
-        app.state.set(image_duration=dur, volume=vol)
-        app.player.set_image_duration(dur)
-        app.player.set_volume(vol)
-        try:
-            app.set_mode(data.get("mode", app.state.get("mode")), data.get("single_file") or None)
+            app.apply_settings(data)
         except ValueError as e:
             return err(str(e))
         return jsonify({"ok": True})
+
+    @web.get("/api/screenshot")
+    def screenshot():
+        path = os.path.join(config.RUN_DIR, "screen.jpg")
+        with shot_lock:
+            fresh = os.path.isfile(path) and time.time() - os.path.getmtime(path) < 2
+            if not fresh:
+                if not app.player.output_on:
+                    return err("HDMI сигналът е спрян – няма какво да се покаже.", 409)
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+                if not app.player.screenshot(path):
+                    return err("Няма картина в момента.", 404)
+        resp = send_from_directory(config.RUN_DIR, "screen.jpg", max_age=0)
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
+    @web.get("/api/backup")
+    def backup():
+        data = json.dumps(app.backup(), ensure_ascii=False, indent=2)
+        stamp = datetime.fromtimestamp(system.now()).strftime("%Y-%m-%d")
+        return Response(data, mimetype="application/json", headers={
+            "Content-Disposition": f'attachment; filename="promotv-backup-{stamp}.json"'})
+
+    @web.post("/api/restore")
+    def restore():
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            done = app.restore(body.get("backup"), bool(body.get("restore_wifi")))
+        except ValueError as e:
+            return err(str(e))
+        return jsonify({"ok": True, "restored": done})
 
     # ---------------- schedule & TV ----------------
     @web.get("/api/schedule")
@@ -257,7 +303,7 @@ def create_web(app):
     @web.post("/api/system")
     def sys_action():
         action = (request.get_json(force=True, silent=True) or {}).get("action")
-        if action not in ("reboot", "shutdown", "restart"):
+        if action not in ("reboot", "shutdown", "restart", "protect-on", "protect-off"):
             return err("bad action")
         system.system_action(action)
         return jsonify({"ok": True})

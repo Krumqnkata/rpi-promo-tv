@@ -26,7 +26,17 @@ KEYS.update({0x20 + n: f"num{n}" for n in range(10)})
 
 # ">> 04:44:01" -> incoming frame from 0 to 4, opcode 0x44, operand 0x01
 _TRAFFIC = re.compile(r">>\s+([0-9a-fA-F]{2})((?::[0-9a-fA-F]{2})*)")
-_POWER = re.compile(r"power status:\s*(\S+)", re.I)
+_POWER = re.compile(r"power status:\s*(.+)$", re.I)
+
+
+def _power_word(text):
+    """cec-client prints: on | standby | in transition from X to Y | unknown."""
+    text = text.strip().lower()
+    if text == "on" or text.endswith("to on"):
+        return "on"
+    if text == "standby" or text.endswith("to standby"):
+        return "standby"
+    return "unknown"
 
 
 class Cec:
@@ -38,6 +48,8 @@ class Cec:
         self.tv_power = "unknown"   # on | standby | unknown
         self.proc = None
         self._lock = threading.Lock()
+        self._power_reply = threading.Event()
+        self.last_power_reply = None
 
     def start(self):
         threading.Thread(target=self._supervise, name="cec", daemon=True).start()
@@ -76,7 +88,10 @@ class Cec:
             self.available = True
         m = _POWER.search(line)
         if m:
-            self._set_power("on" if m.group(1).lower() == "on" else "standby")
+            self.last_power_reply = _power_word(m.group(1))
+            if self.last_power_reply != "unknown":
+                self._set_power(self.last_power_reply)
+            self._power_reply.set()
             return
         m = _TRAFFIC.search(line)
         if not m:
@@ -129,6 +144,15 @@ class Cec:
             self._write("pow 0")
 
     # ---------- public ----------
+    def query_power(self, timeout=6):
+        """Ask the TV for its power status. Returns on | standby | unknown | None (no reply)."""
+        self._power_reply.clear()
+        if not self._write("pow 0"):
+            return None
+        if self._power_reply.wait(timeout):
+            return self.last_power_reply
+        return None
+
     def power_on(self):
         log.info("TV ON")
         ok = self._write("on 0")
@@ -173,3 +197,6 @@ class FakeCec(Cec):
         self._write("standby 0")
         self._set_power("standby")
         return True
+
+    def query_power(self, timeout=6):
+        return self.tv_power

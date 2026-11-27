@@ -30,15 +30,23 @@ VIDEO_EXT = {".mp4", ".m4v", ".mkv", ".mov", ".avi", ".webm", ".ts", ".mpg", ".m
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
 
 MODES = ("all", "shuffle", "single")
+# auto = CEC standby, and if the TV does not confirm it, also switch the HDMI signal off
+# cec  = CEC only;  hdmi = only switch the HDMI signal off (TV sleeps on "no signal")
+POWER_OFF_MODES = ("auto", "cec", "hdmi")
+CLOCK_FILE = os.path.join(DATA_DIR, "clock")
 
 DEFAULT_STATE = {
-    # Ordered playlist: [{"file": "name.mp4", "enabled": true}, ...]
+    # Ordered playlist:
+    # [{"file": "name.mp4", "enabled": true, "start": "2026-12-01" | null, "end": "2026-12-24" | null}]
     "playlist": [],
     # all = whole list in order, shuffle = random order, single = one file on repeat
     "mode": "all",
     "single_file": None,
     "image_duration": 10,
     "volume": 100,
+    "fade": True,
+    "fade_duration": 0.6,
+    "power_off_mode": "auto",
     "schedule": {
         "enabled": False,
         # Monday .. Sunday
@@ -86,6 +94,8 @@ class State:
             merged["schedule"] = copy.deepcopy(DEFAULT_STATE["schedule"])
         if merged["mode"] not in MODES:
             merged["mode"] = "all"
+        if merged["power_off_mode"] not in POWER_OFF_MODES:
+            merged["power_off_mode"] = "auto"
         self._data = merged
 
     def get(self, key=None):

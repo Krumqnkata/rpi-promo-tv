@@ -1,0 +1,12 @@
+[Unit]
+Description=PromoTV persistent data folder (for the read-only system)
+After=local-fs.target
+Before=promotv.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/promotv-data
+
+[Install]
+WantedBy=multi-user.target
